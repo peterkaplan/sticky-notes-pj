@@ -1,6 +1,6 @@
-// Sticky Note PWA — Service Worker
-const CACHE = 'sticky-v2';
-const ASSETS = [
+// Sticky Note PWA — Service Worker (network-first for code, cache fallback for offline)
+const CACHE = 'sticky-v3';
+const PRECACHE = [
   './',
   'index.html',
   'styles.css',
@@ -12,7 +12,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.allSettled(PRECACHE.map((u) => c.add(u))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -27,20 +31,19 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // Never cache API calls — always hit network.
+  // Never intercept cross-origin (API calls).
   if (url.origin !== self.location.origin) return;
+
+  // Network-first: try fresh, fall back to cache when offline. Keeps users on latest code.
   e.respondWith(
-    caches.match(req).then((cached) => {
-      const fetched = fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fetched;
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then((cached) => cached || Response.error()))
   );
 });
