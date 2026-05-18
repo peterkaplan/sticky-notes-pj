@@ -1,5 +1,5 @@
 // Sticky Note PWA — Service Worker (network-first for code, cache fallback for offline)
-const CACHE = 'sticky-v3';
+const CACHE = 'sticky-v4';
 const PRECACHE = [
   './',
   'index.html',
@@ -34,9 +34,18 @@ self.addEventListener('fetch', (e) => {
   // Never intercept cross-origin (API calls).
   if (url.origin !== self.location.origin) return;
 
-  // Network-first: try fresh, fall back to cache when offline. Keeps users on latest code.
+  // Network-first with cache bypass: always fetch latest, fall back to cache when offline.
+  // Bypassing HTTP cache via { cache: 'no-store' } avoids stale assets from GH Pages CDN.
+  const networkReq = new Request(req.url, {
+    method: 'GET',
+    headers: req.headers,
+    mode: 'same-origin',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    redirect: 'follow',
+  });
   e.respondWith(
-    fetch(req)
+    fetch(networkReq)
       .then((res) => {
         if (res && res.ok) {
           const copy = res.clone();
