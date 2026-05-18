@@ -1,16 +1,20 @@
 // === Sticky Note PWA ===
-// Pure client-side. State lives in localStorage. Password is gated via cookie.
+// Cloud-synced shared list via a Cloudflare Worker.
+// localStorage is an offline cache. Cookie remembers unlock.
 
 (() => {
   'use strict';
 
   // ---- Config ----
-  const PASSWORD = 'pjlove'; // Change here. Stored as plain check; this is a low-risk family app.
+  const PASSWORD = 'pjlove'; // Also the Worker bearer token.
+  const API_BASE = 'https://sticky-notes-pj.phkap96.workers.dev';
   const COOKIE_NAME = 'sticky_unlock';
   const COOKIE_DAYS = 365;
   const STORAGE_KEY = 'stickyNoteItems_v1';
+  const VERSION_KEY = 'stickyNoteVersion_v1';
   const COLOR_KEY = 'stickyBackgroundColor_v1';
   const OWNER_KEY = 'stickyLastOwner_v1';
+  const POLL_INTERVAL_MS = 8000;
 
   const BACKGROUND_COLORS = [
     { name: 'yellow', hex: '#ffdc4d', dark: false },
@@ -72,6 +76,11 @@
     saveItems(items) {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch {}
     },
+    loadVersion() {
+      const v = parseInt(localStorage.getItem(VERSION_KEY) || '0', 10);
+      return Number.isFinite(v) ? v : 0;
+    },
+    saveVersion(v) { localStorage.setItem(VERSION_KEY, String(v)); },
     loadColor() {
       const v = localStorage.getItem(COLOR_KEY);
       if (!v) return BACKGROUND_COLORS[0];
@@ -97,12 +106,39 @@
     return brightness < 0.5; // true => bg is dark => use white text
   }
 
+  // ---- Cloud API ----
+  const API = {
+    async get() {
+      const res = await fetch(`${API_BASE}/notes`, {
+        headers: { 'Authorization': `Bearer ${PASSWORD}` },
+      });
+      if (!res.ok) throw new Error('api get ' + res.status);
+      return res.json();
+    },
+    async put(items, baseVersion) {
+      const res = await fetch(`${API_BASE}/notes`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${PASSWORD}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ items, baseVersion }),
+      });
+      if (!res.ok) throw new Error('api put ' + res.status);
+      return res.json();
+    },
+  };
+
   // ---- State ----
   let state = {
     items: [],
+    version: 0,
     color: BACKGROUND_COLORS[0],
     owner: 'P',
     activeTab: 'today',
+    online: navigator.onLine,
+    pendingPut: false,
+    putQueued: false,
   };
 
   // ---- Element refs ----
@@ -143,6 +179,10 @@
       $('gate-input').focus();
     }
   });
+
+  // Bump the cache version so the service worker fetches the new app.js.
+  const APP_VERSION = '2';
+  document.documentElement.dataset.appVersion = APP_VERSION;
 
   // ---- Apply theme color ----
   function applyColor(c) {
@@ -277,6 +317,64 @@
   function persist() {
     Store.saveItems(state.items);
     render();
+    schedulePush();
+  }
+
+  async function schedulePush() {
+    // Coalesce rapid changes: if a put is in flight, queue another.
+    if (state.pendingPut) {
+      state.putQueued = true;
+      return;
+    }
+    state.pendingPut = true;
+    try {
+      const res = await API.put(state.items, state.version);
+      state.version = res.version;
+      Store.saveVersion(state.version);
+      // If our PUT was stale, the server already had a newer version. Pull it.
+      if (res.stale) {
+        await pullFromServer({ silent: true });
+      }
+    } catch (e) {
+      console.warn('push failed', e);
+      showToast('Offline — saved locally', true);
+    } finally {
+      state.pendingPut = false;
+      if (state.putQueued) {
+        state.putQueued = false;
+        schedulePush();
+      }
+    }
+  }
+
+  async function pullFromServer(opts) {
+    opts = opts || {};
+    try {
+      const res = await API.get();
+      // If server has a newer version, accept it.
+      if (res.version !== state.version || !equalItems(state.items, res.items)) {
+        if (res.version >= state.version) {
+          state.items = res.items;
+          state.version = res.version;
+          Store.saveItems(state.items);
+          Store.saveVersion(state.version);
+          render();
+        }
+      }
+    } catch (e) {
+      if (!opts.silent) console.warn('pull failed', e);
+    }
+  }
+
+  function equalItems(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i], y = b[i];
+      if (x.id !== y.id || x.text !== y.text || x.isStrikethrough !== y.isStrikethrough ||
+          x.owner !== y.owner || x.priority !== y.priority ||
+          x.archivedAt !== y.archivedAt || x.archivedBy !== y.archivedBy) return false;
+    }
+    return true;
   }
 
   function addItem(priority) {
@@ -692,6 +790,7 @@
   // ---- Init ----
   function init() {
     state.items = Store.loadItems();
+    state.version = Store.loadVersion();
     state.color = Store.loadColor();
     state.owner = Store.loadOwner();
 
@@ -722,6 +821,27 @@
     setInterval(renderCountdown, 60 * 60 * 1000); // hourly
     render();
     updateSendButton();
+
+    // Initial cloud pull, then poll while visible.
+    pullFromServer();
+    startPolling();
+
+    // Pull whenever the tab returns to foreground.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') pullFromServer();
+    });
+    window.addEventListener('online', () => {
+      pullFromServer();
+      if (state.items.length) schedulePush();
+    });
+  }
+
+  let pollTimer = null;
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') pullFromServer({ silent: true });
+    }, POLL_INTERVAL_MS);
   }
 
   document.addEventListener('DOMContentLoaded', checkGate);

@@ -1,5 +1,5 @@
 // Sticky Note PWA — Service Worker
-const CACHE = 'sticky-v1';
+const CACHE = 'sticky-v2';
 const ASSETS = [
   './',
   'index.html',
@@ -26,12 +26,14 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // Never cache API calls — always hit network.
+  if (url.origin !== self.location.origin) return;
   e.respondWith(
     caches.match(req).then((cached) => {
       const fetched = fetch(req)
         .then((res) => {
-          // Update cache for known assets only
-          if (res && res.ok && new URL(req.url).origin === self.location.origin) {
+          if (res && res.ok) {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           }
