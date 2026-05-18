@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#ffdc4d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sticky">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Sticky</title>
+</head>
+<body>
+  <!-- Password gate -->
+  <div id="gate" class="gate hidden">
+    <div class="gate-card">
+      <div class="gate-heart">💛</div>
+      <h1>P &amp; J</h1>
+      <p>Enter the secret</p>
+      <form id="gate-form" autocomplete="off">
+        <input id="gate-input" type="password" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="••••••" />
+        <button type="submit">Unlock</button>
+      </form>
+      <div id="gate-error" class="gate-error"></div>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="app" class="app hidden">
+    <header id="header" class="header">
+      <div class="tabs">
+        <button class="tab active" data-tab="today">
+          <span class="tab-title">Today</span><span class="tab-count" id="count-today">0</span>
+        </button>
+        <button class="tab" data-tab="thisWeek">
+          <span class="tab-title">This Week</span><span class="tab-count" id="count-thisWeek">0</span>
+        </button>
+        <button class="tab" data-tab="archive">
+          <span class="tab-title">Done</span><span class="tab-count" id="count-archive">0</span>
+        </button>
+      </div>
+      <button id="color-btn" class="color-btn" aria-label="Background color"></button>
+    </header>
+
+    <main class="content">
+      <section class="tab-panel active" data-panel="today">
+        <div class="list" id="list-today"></div>
+        <div class="empty hidden" id="empty-today">
+          <div class="empty-icon">★</div>
+          <div class="empty-text">Nothing for today</div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="thisWeek">
+        <div class="list" id="list-thisWeek"></div>
+        <div class="empty hidden" id="empty-thisWeek">
+          <div class="empty-icon">📅</div>
+          <div class="empty-text">Nothing this week</div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="archive">
+        <div class="list" id="list-archive"></div>
+        <div class="empty hidden" id="empty-archive">
+          <div class="empty-icon">✓</div>
+          <div class="empty-text">No completed items</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Wedding countdown badge (bottom-left, low contrast) -->
+    <div id="countdown" class="countdown"></div>
+
+    <footer class="input-bar">
+      <div class="owners">
+        <button class="owner-pill" data-owner="P">P</button>
+        <button class="owner-pill" data-owner="J">J</button>
+        <button class="owner-pill" data-owner="PJ">PJ</button>
+      </div>
+      <input id="new-text" type="text" placeholder="Add note..." enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="true" />
+      <button id="send-btn" class="send-btn" aria-label="Add note">↑</button>
+      <div id="send-hint" class="send-hint hidden">THIS WEEK</div>
+    </footer>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Color picker sheet -->
+    <div id="color-sheet" class="sheet hidden" aria-hidden="true">
+      <div class="sheet-backdrop"></div>
+      <div class="sheet-card">
+        <div class="sheet-title">Background Color</div>
+        <div class="color-grid" id="color-grid"></div>
+        <button class="sheet-done" id="color-done">Done</button>
+      </div>
+    </div>
+
+    <!-- Easter egg overlays -->
+    <div id="heart-burst" class="heart-burst hidden"></div>
+    <div id="love-message" class="love-message hidden">
+      <div class="love-card">
+        <div class="love-heart">💕</div>
+        <div class="love-title">P &amp; J</div>
+        <div class="love-sub">Two hearts, one love</div>
+        <div class="love-inf">♾️</div>
+        <div class="love-dismiss">tap to dismiss</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
