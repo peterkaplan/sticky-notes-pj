@@ -6,15 +6,18 @@
   'use strict';
 
   // ---- Config ----
-  const PASSWORD = 'pjlove'; // Also the Worker bearer token.
+  // No password lives here — the server is the only place the password is checked.
+  // The gate sends the password to /auth and gets back an opaque session token.
   const API_BASE = 'https://sticky-notes-pj.phkap96.workers.dev';
-  const COOKIE_NAME = 'sticky_unlock';
-  const COOKIE_DAYS = 365;
+  const SESSION_KEY = 'stickyNoteSession_v1';
   const STORAGE_KEY = 'stickyNoteItems_v1';
   const VERSION_KEY = 'stickyNoteVersion_v1';
   const COLOR_KEY = 'stickyBackgroundColor_v1';
   const OWNER_KEY = 'stickyLastOwner_v1';
   const POLL_INTERVAL_MS = 8000;
+
+  function getSession() { return localStorage.getItem(SESSION_KEY); }
+  function setSession(t) { if (t) localStorage.setItem(SESSION_KEY, t); else localStorage.removeItem(SESSION_KEY); }
 
   const BACKGROUND_COLORS = [
     { name: 'yellow', hex: '#ffdc4d', dark: false },
@@ -37,20 +40,7 @@
     'endlessly yours', 'my sunshine ☀️', 'love of my life', 'forever yours',
   ];
 
-  // ---- Cookie helpers ----
-  function setCookie(name, value, days) {
-    const d = new Date();
-    d.setTime(d.getTime() + days * 86400000);
-    document.cookie = `${name}=${encodeURIComponent(value)}; expires=${d.toUTCString()}; path=/; SameSite=Lax`;
-  }
-  function getCookie(name) {
-    const parts = document.cookie.split(';');
-    for (const p of parts) {
-      const [k, ...v] = p.trim().split('=');
-      if (k === name) return decodeURIComponent(v.join('='));
-    }
-    return null;
-  }
+  // (Cookie helpers removed — auth is now a server-issued session token in localStorage.)
 
   // ---- UUID ----
   function uuid() {
@@ -107,23 +97,31 @@
   }
 
   // ---- Cloud API ----
+  function authHeaders() {
+    const t = getSession();
+    return t ? { 'Authorization': `Bearer ${t}` } : {};
+  }
+  function handle401(res) {
+    if (res.status === 401) {
+      setSession(null);
+      showGate();
+      throw new Error('session expired');
+    }
+  }
   const API = {
     async get() {
-      const res = await fetch(`${API_BASE}/notes`, {
-        headers: { 'Authorization': `Bearer ${PASSWORD}` },
-      });
+      const res = await fetch(`${API_BASE}/notes`, { headers: authHeaders() });
+      handle401(res);
       if (!res.ok) throw new Error('api get ' + res.status);
       return res.json();
     },
     async put(items, baseVersion) {
       const res = await fetch(`${API_BASE}/notes`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${PASSWORD}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ items, baseVersion }),
       });
+      handle401(res);
       if (!res.ok) throw new Error('api put ' + res.status);
       return res.json();
     },
@@ -156,7 +154,7 @@
     init();
   }
   function checkGate() {
-    if (getCookie(COOKIE_NAME) === 'yes') {
+    if (getSession()) {
       $('gate').classList.add('hidden');
       $('app').classList.remove('hidden');
       init();
@@ -165,24 +163,40 @@
     }
   }
 
-  $('gate-form').addEventListener('submit', (e) => {
+  $('gate-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const v = $('gate-input').value.trim().toLowerCase();
+    const submitBtn = $('gate-form').querySelector('button[type="submit"]');
+    const input = $('gate-input');
     const err = $('gate-error');
-    if (v === PASSWORD) {
-      setCookie(COOKIE_NAME, 'yes', COOKIE_DAYS);
-      err.textContent = '';
-      unlock();
-    } else {
-      err.textContent = 'Try again';
-      $('gate-input').value = '';
-      $('gate-input').focus();
+    const password = input.value;
+    if (!password) return;
+    submitBtn.disabled = true;
+    err.textContent = '';
+    try {
+      const res = await fetch(`${API_BASE}/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (res.status === 429) {
+        const data = await res.json().catch(() => ({}));
+        const mins = Math.ceil((data.retryAfter || 600) / 60);
+        err.textContent = `Locked out — try again in ${mins} min`;
+      } else if (!res.ok) {
+        err.textContent = 'Try again';
+        input.value = '';
+        input.focus();
+      } else {
+        const data = await res.json();
+        setSession(data.token);
+        unlock();
+      }
+    } catch {
+      err.textContent = 'Network error — try again';
+    } finally {
+      submitBtn.disabled = false;
     }
   });
-
-  // Bump the cache version so the service worker fetches the new app.js.
-  const APP_VERSION = '2';
-  document.documentElement.dataset.appVersion = APP_VERSION;
 
   // ---- Apply theme color ----
   function applyColor(c) {

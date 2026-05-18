@@ -1,5 +1,5 @@
 // Sticky Note PWA — Service Worker (network-first for code, cache fallback for offline)
-const CACHE = 'sticky-v4';
+const CACHE = 'sticky-v5';
 const PRECACHE = [
   './',
   'index.html',
