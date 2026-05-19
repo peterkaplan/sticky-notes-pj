@@ -830,6 +830,7 @@
     setupColorPicker();
     setupHeaderTaps();
     setupTabSwipe();
+    setupPullToRefresh();
 
     renderCountdown();
     setInterval(renderCountdown, 60 * 60 * 1000); // hourly
@@ -856,6 +857,100 @@
     pollTimer = setInterval(() => {
       if (document.visibilityState === 'visible') pullFromServer({ silent: true });
     }, POLL_INTERVAL_MS);
+  }
+
+  // ---- Pull-to-refresh ----
+  function setupPullToRefresh() {
+    const ptr = $('ptr');
+    const TRIGGER = 70;            // pull distance to arm refresh
+    const MAX_PULL = 120;          // visual cap
+    const REST_OFFSET = -18;       // indicator starting hidden position
+    const ARMED_OFFSET = 36;       // where it sits while loading
+
+    let startY = null;
+    let pulling = false;
+    let armed = false;
+    let loading = false;
+    let panel = null;
+
+    const onStart = (e) => {
+      if (loading) return;
+      panel = e.currentTarget;
+      if (panel.scrollTop > 0) { startY = null; return; }
+      const t = e.touches ? e.touches[0] : e;
+      startY = t.clientY;
+      pulling = false;
+      armed = false;
+    };
+    const onMove = (e) => {
+      if (startY === null || loading) return;
+      const t = e.touches ? e.touches[0] : e;
+      let dy = t.clientY - startY;
+      if (dy <= 0) {
+        if (pulling) {
+          // Aborted: hide the indicator.
+          ptr.classList.remove('visible', 'armed');
+          ptr.style.transform = '';
+        }
+        pulling = false;
+        return;
+      }
+      // We're pulling down at scrollTop 0.
+      pulling = true;
+      if (e.cancelable) e.preventDefault();
+      // Rubber-band feel: dampen past trigger.
+      const damped = dy < TRIGGER ? dy : TRIGGER + (dy - TRIGGER) * 0.4;
+      const clamped = Math.min(damped, MAX_PULL);
+      ptr.classList.add('visible');
+      armed = clamped >= TRIGGER;
+      ptr.classList.toggle('armed', armed);
+      ptr.style.transform = `translate(-50%, ${REST_OFFSET + clamped}px) scale(${0.8 + Math.min(0.2, clamped / 600)})`;
+    };
+    const onEnd = async () => {
+      if (loading) return;
+      const wasArmed = armed;
+      const wasPulling = pulling;
+      startY = null;
+      pulling = false;
+      armed = false;
+      if (!wasPulling) return;
+      if (wasArmed) {
+        loading = true;
+        ptr.classList.remove('armed');
+        ptr.classList.add('loading');
+        ptr.style.transform = `translate(-50%, ${REST_OFFSET + ARMED_OFFSET}px) scale(1)`;
+        haptic('light');
+        try { await pullFromServer({ silent: true }); } catch {}
+        // Hold spinner briefly so it doesn't feel jumpy.
+        await new Promise(r => setTimeout(r, 300));
+        loading = false;
+        ptr.classList.remove('loading', 'visible');
+        ptr.style.transform = '';
+      } else {
+        // snap back
+        ptr.classList.remove('visible', 'armed');
+        ptr.style.transform = '';
+      }
+    };
+    const onCancel = () => {
+      if (loading) return;
+      startY = null;
+      pulling = false;
+      armed = false;
+      ptr.classList.remove('visible', 'armed');
+      ptr.style.transform = '';
+    };
+
+    document.querySelectorAll('.tab-panel').forEach((p) => {
+      p.addEventListener('touchstart', onStart, { passive: true });
+      p.addEventListener('touchmove', onMove, { passive: false });
+      p.addEventListener('touchend', onEnd);
+      p.addEventListener('touchcancel', onCancel);
+      // Mouse fallback for desktop testing
+      p.addEventListener('mousedown', (e) => { onStart(e); });
+      window.addEventListener('mousemove', (e) => { if (startY !== null) onMove(e); });
+      window.addEventListener('mouseup', () => { if (startY !== null) onEnd(); });
+    });
   }
 
   document.addEventListener('DOMContentLoaded', checkGate);
